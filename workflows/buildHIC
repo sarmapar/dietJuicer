@@ -6,7 +6,7 @@ import glob
 
 ##### Load config and sample sheets #####
 onsuccess:
-	print("buildHIC completed successfully!")
+        print("buildHIC completed successfully!")
 
 configfile: "config/config.yaml"
 
@@ -22,28 +22,24 @@ samples['id'] = samples[config['mergeBy']].agg('_'.join, axis=1)
 ## Use ID's as groups
 groups = list(set(samples['id']))
 
-## Group by id and extract merged_nodups, inter & inter30
-int1 = samples.groupby('id')['inter'].apply(list).to_dict()
-int30 = samples.groupby('id')['inter30'].apply(list).to_dict()
+## Group by id and extract merged_nodups
 mergNoDups = samples.groupby('id')['merged_nodups'].apply(list).to_dict()
 
 ## Get unique files for each grouping
 for key in groups:
-    int1[key] = list(set(int1[key]))
-    int30[key] = list(set(int30[key]))
     mergNoDups[key] = list(set(mergNoDups[key]))
 
 ##### Define rules #####
 rule all:
     input:
-        expand('output/{group}/{group}_inter{ext}', group=groups, ext=['.hic', '_30.hic'])
+        expand('output/{group}/{group}_inter{ext}', group=groups, ext=['.hic'])
 
 ## Merge all merged_nodups.txt files found in mergeList
 rule mergedNoDups:
     input:
         lambda wildcards: mergNoDups[wildcards.group]
     output:
-        merged_nodups = 'output/{group}/{group}_merged_nodups.txt.gz',
+        merged_nodups = 'output/{group}/{group}_merged_nodups.txt',
         done = 'output/{group}/{group}_mergedNoDups_done.txt'
     log:
         'output/{group}/logs/{group}_merged_nodups.err'
@@ -55,68 +51,15 @@ rule mergedNoDups:
         module load pigz
         tmp_dir=$(mktemp -d -p $PWD)
         cmd="sort --parallel={threads} -T $tmp_dir -m -k2,2d -k6,6d "
-        for i in {input}; do cmd="$cmd <(gunzip -c '$i')"; done
+        for i in {input}; do cmd="$cmd <(cat '$i')"; done
         eval "$cmd" | pigz -p {threads} > {output.merged_nodups} 2> {log}
         rm -rf $tmp_dir
-        touch {output.done}
-        """
-
-## Create statistics files for MQ > 0
-rule inter:
-    input:
-        inter = lambda wildcards: int1[wildcards.group],
-        merged_nodups = rules.mergedNoDups.output.merged_nodups,
-        merged_nodups_done = rules.mergedNoDups.output.done
-    output:
-        inter = 'output/{group}/{group}_inter.txt',
-        hists = 'output/{group}/{group}_inter_hists.m',
-        done = 'output/{group}/{group}_inter_done.txt'
-    log:
-        err = 'output/{group}/logs/{group}_inter.err'
-    benchmark:
-        'output/{group}/benchmarks/{group}_inter.tsv'
-    params:
-        ligation = config['ligation'],
-        site_file = config['site_file']
-    threads: 1
-    shell:
-        """
-        awk -f ./scripts/makemega_addstats.awk {input.inter} > {output.inter} 2> {log.err}
-        gunzip -c {input.merged_nodups} | ./scripts/statistics.pl -q 1 -o {output.inter} -s {params.site_file} 2>> {log.err}
-        touch {output.done}
-        """
-
-## Create statistics files for MP > 30
-rule inter30:
-    input:
-        inter30 = lambda wildcards: int30[wildcards.group],
-        merged_nodups = rules.mergedNoDups.output.merged_nodups,
-        merged_nodups_done = rules.mergedNoDups.output.done
-    output:
-        inter30 = 'output/{group}/{group}_inter_30.txt',
-        hists30 = 'output/{group}/{group}_inter_30_hists.m',
-        done = 'output/{group}/{group}_inter_done.txt'
-    log:
-        err = 'output/{group}/logs/{group}_inter30.err'
-    benchmark:
-        'output/{group}/benchmarks/{group}_inter30.tsv'
-    params:
-        ligation = config['ligation'],
-        site_file = config['site_file']
-    threads: 1
-    shell:
-        """
-        awk -f ./scripts/makemega_addstats.awk {input.inter30} > {output.inter30} 2> {log.err}
-        gunzip -c {input.merged_nodups} | ./scripts/statistics.pl -q 30 -o {output.inter30} -s {params.site_file} 2>> {log.err}
         touch {output.done}
         """
 
 ## Create Hi-C maps file for MQ > 0
 rule hic:
     input:
-        inter = rules.inter.output.inter,
-        inter_done = rules.inter.output.done,
-        hists = rules.inter.output.hists,
         merged_nodups = rules.mergedNoDups.output.merged_nodups,
         merged_nodups_done = rules.mergedNoDups.output.done
     output:
@@ -131,28 +74,6 @@ rule hic:
     threads: 1
     shell:
         """
-        ./scripts/juicer_tools pre -s {input.inter} -g {input.hists} -q 1 {input.merged_nodups} {output.hic} {params.chromSizes} 1> {log.out} 2> {log.err}
-        """
-
-## Create Hi-C maps file for MQ > 30
-rule hic30:
-    input:
-        inter30 = rules.inter30.output.inter30,
-        inter30_done = rules.inter30.output.done,
-        hists30 = rules.inter30.output.hists30,
-        merged_nodups = rules.mergedNoDups.output.merged_nodups,
-        merged_nodups_done = rules.mergedNoDups.output.done
-    output:
-        hic30 = 'output/{group}/{group}_inter_30.hic'
-    log:
-        err = 'output/{group}/logs/{group}_hic30.err',
-        out = 'output/{group}/logs/{group}_hic30.out'
-    benchmark:
-        'output/{group}/benchmarks/{group}_hic30.tsv'
-    params:
-        chromSizes = config['chromSizes']
-    threads: 1
-    shell:
-        """
-        ./scripts/juicer_tools pre -s {input.inter30} -g {input.hists30} -q 30 {input.merged_nodups} {output.hic30} {params.chromSizes} 1> {log.out} 2> {log.err}
+        sort -k3,3d -k7,7d -o {input.merged_nodups} {input.merged_nodups}
+        ./scripts/juicer_tools pre -q 1 {input.merged_nodups} {output.hic} {params.chromSizes} 1> {log.out} 2> {log.err}
         """
