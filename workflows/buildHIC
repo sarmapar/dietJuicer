@@ -39,7 +39,7 @@ rule mergedNoDups:
     input:
         lambda wildcards: mergNoDups[wildcards.group]
     output:
-        merged_nodups = 'output/{group}/{group}_merged_nodups.txt',
+        merged_nodups = 'output/{group}/{group}_merged_nodups.txt.gz',
         done = 'output/{group}/{group}_mergedNoDups_done.txt'
     log:
         'output/{group}/logs/{group}_merged_nodups.err'
@@ -50,7 +50,7 @@ rule mergedNoDups:
         """
         module load pigz
         tmp_dir=$(mktemp -d -p $PWD)
-        cmd="sort --parallel={threads} -T $tmp_dir -m -k2,2d -k6,6d "
+        cmd="sort --parallel={threads} -T $tmp_dir -m -k3,3d -k7,7d "
         for i in {input}; do cmd="$cmd <(cat '$i')"; done
         eval "$cmd" | pigz -p {threads} > {output.merged_nodups} 2> {log}
         rm -rf $tmp_dir
@@ -74,6 +74,5 @@ rule hic:
     threads: 1
     shell:
         """
-        sort -k3,3d -k7,7d -o {input.merged_nodups} {input.merged_nodups}
-        ./scripts/juicer_tools pre -q 1 {input.merged_nodups} {output.hic} {params.chromSizes} 1> {log.out} 2> {log.err}
+        ./scripts/juicer_tools pre -q 1 {input.merged_nodups} {output.hic} {params.chromSizes} 1>> {log.out} 2>> {log.err}
         """
